@@ -118,23 +118,29 @@ AGENTS = {
 
 
 def classify_query(query: str) -> str:
-    """Route a query to the best agent based on keywords."""
-    query_lower = query.lower()
+    """Route a query to the best specialized agent using weighted keyword scoring."""
+    query_lower = (query or "").lower()
 
-    security_keywords = ["security", "vulnerability", "owasp", "injection", "xss",
-                         "csrf", "secret", "credential", "auth", "penetration"]
-    code_keywords = ["review", "bug", "refactor", "code quality", "anti-pattern",
-                     "lint", "test", "coverage", "pull request", "pr "]
-    bim_keywords = ["revit", "bim", "wall", "floor plan", "sheet", "construction",
-                    "building", "architecture", "detail", "annotation"]
-
-    if any(kw in query_lower for kw in security_keywords):
-        return "security_auditor"
-    if any(kw in query_lower for kw in code_keywords):
-        return "code_reviewer"
-    if any(kw in query_lower for kw in bim_keywords):
-        return "bim_engineer"
-    return "researcher"
+    keyword_map = {
+        "security_auditor": [
+            "security", "vulnerability", "owasp", "injection", "xss",
+            "csrf", "secret", "credential", "auth", "penetration", "cve"
+        ],
+        "code_reviewer": [
+            "review", "bug", "refactor", "code quality", "anti-pattern",
+            "lint", "test", "coverage", "pull request", "pr ", "exception"
+        ],
+        "bim_engineer": [
+            "revit", "bim", "wall", "floor plan", "sheet", "construction",
+            "building", "architecture", "detail", "annotation"
+        ],
+    }
+    scores = {
+        agent_id: sum(1 for kw in kws if kw in query_lower)
+        for agent_id, kws in keyword_map.items()
+    }
+    best_agent, best_score = max(scores.items(), key=lambda item: item[1])
+    return best_agent if best_score > 0 else "researcher"
 
 
 def mcp_tool_to_anthropic(tool) -> dict:
@@ -158,28 +164,33 @@ async def connect_mcp_servers(agent: Agent) -> tuple[AsyncExitStack, list[dict],
     all_tools = []
     session_map = {}
 
-    for srv_config in agent.mcp_servers:
-        env = {**os.environ}
-        if "env" in srv_config:
-            env.update(srv_config["env"])
+    try:
+        for srv_config in agent.mcp_servers:
+            env = {**os.environ}
+            if "env" in srv_config:
+                env.update(srv_config["env"])
 
-        params = StdioServerParameters(
-            command=srv_config["command"],
-            args=srv_config.get("args", []),
-            env=env,
-        )
+            params = StdioServerParameters(
+                command=srv_config["command"],
+                args=srv_config.get("args", []),
+                env=env,
+            )
 
-        stdio_transport = await stack.enter_async_context(stdio_client(params))
-        read_stream, write_stream = stdio_transport
-        session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-        await session.initialize()
+            stdio_transport = await stack.enter_async_context(stdio_client(params))
+            read_stream, write_stream = stdio_transport
+            session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+            await session.initialize()
 
-        result = await session.list_tools()
-        for tool in result.tools:
-            all_tools.append(mcp_tool_to_anthropic(tool))
-            session_map[tool.name] = session
-
-    return stack, all_tools, session_map
+            result = await session.list_tools()
+            for tool in result.tools:
+                # Prevent duplicate tool name collisions across multiple MCP servers
+                if tool.name not in session_map:
+                    all_tools.append(mcp_tool_to_anthropic(tool))
+                    session_map[tool.name] = session
+        return stack, all_tools, session_map
+    except BaseException:
+        await stack.aclose()
+        raise
 
 
 async def run_agent_async(client: Anthropic, agent: Agent, query: str, history: list) -> str:
@@ -206,8 +217,11 @@ async def run_agent_async(client: Anthropic, agent: Agent, query: str, history: 
             tools=tools,
         )
 
-        # Agentic loop: handle tool calls until we get a final text response
-        while response.stop_reason == "tool_use":
+        # Agentic loop with max_iterations guard to prevent infinite tool-calling cycles
+        max_iterations = 10
+        iteration = 0
+        while response.stop_reason == "tool_use" and iteration < max_iterations:
+            iteration += 1
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
             tool_results = []
 
