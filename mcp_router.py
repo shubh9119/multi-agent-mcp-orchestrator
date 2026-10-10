@@ -1,8 +1,9 @@
 """Core MCP routing and tool deduplication utilities (importable without Streamlit runtime)."""
+import re
 from typing import Dict, List, Any
 
 def classify_intent(query: str) -> str:
-    """Weighted multi-keyword intent classifier for routing queries to specialized MCP agents."""
+    """Weighted word-boundary intent classifier for routing queries to specialized MCP agents."""
     query_lower = (query or "").lower()
     keyword_map = {
         "security_auditor": [
@@ -11,7 +12,7 @@ def classify_intent(query: str) -> str:
         ],
         "code_reviewer": [
             "review", "bug", "refactor", "code quality", "anti-pattern",
-            "lint", "test", "coverage", "pull request", "pr ", "exception"
+            "lint", "test", "coverage", "pull request", "pr", "exception"
         ],
         "bim_engineer": [
             "revit", "bim", "wall", "floor plan", "sheet", "construction",
@@ -19,7 +20,10 @@ def classify_intent(query: str) -> str:
         ],
     }
     scores = {
-        agent_id: sum(1 for kw in kws if kw in query_lower)
+        agent_id: sum(
+            1 for kw in kws
+            if re.search(rf"\b{re.escape(kw)}\b", query_lower)
+        )
         for agent_id, kws in keyword_map.items()
     }
     best_agent, best_score = max(scores.items(), key=lambda item: item[1])
