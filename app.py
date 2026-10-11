@@ -1,4 +1,4 @@
-"""Multi-MCP Agent Forge - Specialized agents with MCP tool routing.
+"""Multi-Agent MCP Orchestrator - Domain-specialized agents with Model Context Protocol routing.
 
 Each agent connects to different MCP servers based on its domain expertise.
 This demonstrates the pattern of routing queries to specialized agents
@@ -18,7 +18,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 st.set_page_config(
-    page_title="Agent Forge - Multi-MCP Agents",
+    page_title="Multi-Agent MCP Orchestrator",
     page_icon="\u2692\ufe0f",
     layout="wide",
 )
@@ -286,7 +286,7 @@ def run_agent(client: Anthropic, agent: Agent, query: str, history: list) -> str
 
 
 def main():
-    st.markdown("# \u2692\ufe0f Agent Forge")
+    st.markdown("# \u2692\ufe0f Multi-Agent MCP Orchestrator")
     st.markdown("**Specialized AI agents with MCP tool routing.** "
                 "Each agent connects to different MCP servers based on its expertise.")
 
